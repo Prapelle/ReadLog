@@ -114,8 +114,26 @@
     border:none;
     align-items:stretch;
     width:100%;
+    position:relative;
+    cursor:pointer;
   }
   .book-card:active{ transform:scale(.985); }
+
+  .fav-btn{
+    position:absolute;
+    top:8px; right:8px;
+    width:28px; height:28px;
+    border:none;
+    border-radius:50%;
+    background:rgba(255,255,255,.9);
+    box-shadow:0 1px 3px rgba(43,42,34,.15);
+    color:var(--line);
+    font-size:1.05rem;
+    line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    z-index:3;
+  }
+  .fav-btn.on{ color:var(--gold); }
 
   .cover-wrap{
     position:relative;
@@ -155,7 +173,7 @@
     box-shadow:0 2px 4px rgba(0,0,0,.15);
   }
 
-  .info{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:4px; }
+  .info{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:4px; padding-right:26px; }
   .info .title{
     font-size:.98rem; font-weight:700; color:var(--ink);
     display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
@@ -553,6 +571,7 @@
       }
       if(typeof b.progressValue !== "number") b.progressValue = parseInt(b.progressValue,10) || 0;
       if(!Array.isArray(b.tags)) b.tags = [];
+      if(typeof b.favorite !== "boolean") b.favorite = false;
       return b;
     });
   }
@@ -614,7 +633,8 @@
       subLine = label ? '<div class="sub">'+ escapeHTML(label) +'</div>' : '<div class="sub">ยังไม่ระบุความคืบหน้า</div>';
     }
     return (
-      '<button class="book-card" data-id="'+ book.id +'" type="button">' +
+      '<div class="book-card" data-id="'+ book.id +'" tabindex="0" role="button">' +
+        '<button class="fav-btn' + (book.favorite ? ' on' : '') + '" type="button" data-fav-id="'+ book.id +'" aria-label="ตั้งเป็นรายการโปรด">'+ (book.favorite ? '★' : '☆') +'</button>' +
         '<div class="cover-wrap">' + coverHTML(book) + ribbon + '</div>' +
         '<div class="info">' +
           '<div class="title">'+ escapeHTML(book.title) +'</div>' +
@@ -624,7 +644,7 @@
             tagChipsHTML(book.tags) +
           '</div>' +
         '</div>' +
-      '</button>'
+      '</div>'
     );
   }
 
@@ -637,7 +657,11 @@
         if(b.title.toLowerCase().indexOf(query) !== -1) return true;
         return (b.tags || []).some(function(t){ return t.toLowerCase().indexOf(query) !== -1; });
       })
-      .sort(function(a,b){ return new Date(b.updatedAt) - new Date(a.updatedAt); });
+      .sort(function(a,b){
+        var fa = a.favorite ? 1 : 0, fb = b.favorite ? 1 : 0;
+        if(fa !== fb) return fb - fa;
+        return new Date(b.updatedAt) - new Date(a.updatedAt);
+      });
   }
 
   function renderEmpty(container, opts){
@@ -713,11 +737,30 @@
   document.getElementById('readingSearch').addEventListener('input', renderReading);
   document.getElementById('historySearch').addEventListener('input', renderHistory);
 
-  /* card tap -> open edit */
+  /* card tap -> open edit / favorite star -> toggle */
+  function toggleFavorite(id){
+    var book = books.find(function(b){ return b.id === id; });
+    if(!book) return;
+    book.favorite = !book.favorite;
+    save();
+    renderAll();
+  }
   ['readingCards','historyCards'].forEach(function(id){
-    document.getElementById(id).addEventListener('click', function(e){
+    var container = document.getElementById(id);
+    container.addEventListener('click', function(e){
+      var favBtn = e.target.closest('.fav-btn');
+      if(favBtn){
+        e.stopPropagation();
+        toggleFavorite(favBtn.dataset.favId);
+        return;
+      }
       var card = e.target.closest('.book-card');
       if(card) openEdit(card.dataset.id);
+    });
+    container.addEventListener('keydown', function(e){
+      if(e.key !== 'Enter' && e.key !== ' ') return;
+      var card = e.target.closest('.book-card');
+      if(card){ e.preventDefault(); openEdit(card.dataset.id); }
     });
   });
 
@@ -850,6 +893,7 @@
       progressValue: value,
       status: "reading",
       rating: 0,
+      favorite: false,
       tags: addTags.get(),
       updatedAt: nowISO()
     };
