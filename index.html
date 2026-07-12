@@ -35,14 +35,16 @@
     font-size:16px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0; padding:0;}
+  html,body{margin:0; padding:0; height:100%; overscroll-behavior:none;}
   body{
     background:var(--paper);
     color:var(--ink);
     font-family:'Noto Sans Thai','Noto Sans','Segoe UI',sans-serif;
-    min-height:100vh;
+    height:100vh;
+    height:100dvh;
     display:flex;
     justify-content:center;
+    overflow:hidden;
   }
   h1,h2,h3{font-family:'Noto Serif Thai','Noto Sans Thai',serif; font-weight:700; margin:0;}
   button{font-family:inherit; cursor:pointer;}
@@ -54,15 +56,17 @@
   .app{
     width:100%;
     max-width:480px;
-    min-height:100vh;
+    height:100vh;
+    height:100dvh;
     background:var(--paper);
     display:flex;
     flex-direction:column;
     position:relative;
+    overflow:hidden;
   }
   @media (min-width:481px){
     body{ padding:28px 0; }
-    .app{ min-height:calc(100vh - 56px); border-radius:28px; box-shadow:var(--shadow-pop); }
+    .app{ height:calc(100vh - 56px); border-radius:28px; box-shadow:var(--shadow-pop); }
   }
 
   /* ---- top bar ---- */
@@ -71,11 +75,12 @@
     align-items:center;
     gap:10px;
     padding:20px 20px 8px;
+    flex:none;
   }
   .topbar .logo{ flex:none; display:flex; }
   .topbar h1{ font-size:1.3rem; color:var(--green-dark); letter-spacing:.2px; }
 
-  main.view{ padding:6px 20px 106px; flex:1; }
+  main.view{ padding:6px 20px 106px; flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   main.view[hidden]{ display:none; }
 
   .view-head{ margin:10px 0 14px; }
@@ -193,7 +198,7 @@
 
   /* ---- bottom nav ---- */
   .bottom-nav{
-    position:sticky; bottom:0; left:0; right:0;
+    flex:none;
     display:flex;
     background:rgba(251,250,244,.94);
     backdrop-filter:blur(10px);
