@@ -79,6 +79,22 @@
   }
   .topbar .logo{ flex:none; display:flex; }
   .topbar h1{ font-size:1.3rem; color:var(--green-dark); letter-spacing:.2px; }
+  .icon-btn{
+    margin-left:auto; flex:none;
+    width:36px; height:36px;
+    border:none; background:none;
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--ink-soft);
+    position:relative;
+  }
+  .icon-btn:active{ background:var(--green-wash); color:var(--green-dark); }
+  .sync-dot{
+    position:absolute; top:5px; right:5px;
+    width:8px; height:8px; border-radius:50%;
+    background:var(--green);
+    border:1.5px solid var(--surface);
+  }
 
   main.view{ padding:6px 20px 106px; flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   main.view[hidden]{ display:none; }
@@ -361,7 +377,8 @@
     border:none; background:none; color:var(--green-dark);
     font-size:.95rem; line-height:1; padding:2px; display:flex;
   }
-  .field-hint{ font-size:.74rem; color:var(--ink-soft); margin-top:6px; }
+  .field-hint{ font-size:.74rem; color:var(--ink-soft); margin-top:6px; margin-bottom:10px; }
+  .field .btn-primary, .field .file-btn.wide{ width:100%; display:block; }
 
   .sheet-actions{ display:flex; flex-direction:column; gap:10px; margin-top:18px; }
   .btn-primary{
@@ -388,6 +405,10 @@
       </svg>
     </span>
     <h1>ReadLog</h1>
+    <button class="icon-btn" id="dataBtn" aria-label="นำเข้า/ส่งออกข้อมูล" type="button">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+      <span class="sync-dot" id="syncDot" hidden></span>
+    </button>
   </header>
 
   <!-- READING (default landing) -->
@@ -538,7 +559,60 @@
   </div>
 </div>
 
-<script>
+<!-- DATA TRANSFER SHEET -->
+<div class="overlay" id="dataOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>ย้ายข้อมูลไปเครื่องอื่น</h2>
+    <div class="field">
+      <label>ซิงก์ข้ามเครื่องอัตโนมัติ</label>
+      <div id="authSignedOut">
+        <div class="field-hint">เข้าสู่ระบบด้วย Google เพื่อซิงก์ข้อมูลให้ตรงกันทุกเครื่องโดยอัตโนมัติ</div>
+        <button type="button" class="btn-primary" id="signInBtn">เข้าสู่ระบบด้วย Google</button>
+      </div>
+      <div id="authSignedIn" hidden>
+        <div class="field-hint" id="authEmail"></div>
+        <button type="button" class="btn-ghost" id="signOutBtn">ออกจากระบบ</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>ส่งออกข้อมูล</label>
+      <div class="field-hint">บันทึกหนังสือทั้งหมดเป็นไฟล์ .json เก็บไว้ แล้วนำไปนำเข้าในเครื่องใหม่</div>
+      <button type="button" class="btn-primary" id="exportBtn">ส่งออกไฟล์ข้อมูล</button>
+    </div>
+    <div class="field">
+      <label>นำเข้าข้อมูล</label>
+      <div class="field-hint">เลือกไฟล์ .json ที่เคยส่งออกไว้ ระบบจะรวมกับข้อมูลปัจจุบันโดยไม่ลบของเดิม</div>
+      <label class="file-btn wide">เลือกไฟล์เพื่อนำเข้า<input type="file" id="importFile" accept="application/json,.json"></label>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn-ghost" id="dataCancel">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import {
+  getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAQ5hdm-M12YsyvRoMGDretP563pYTL1-I",
+  authDomain: "readlog-73f9f.firebaseapp.com",
+  projectId: "readlog-73f9f",
+  storageBucket: "readlog-73f9f.firebasestorage.app",
+  messagingSenderId: "568301708206",
+  appId: "1:568301708206:web:4da07de92f37089c12de3f"
+};
+const fbApp = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDb = getFirestore(fbApp);
+const googleProvider = new GoogleAuthProvider();
+
 (function(){
   "use strict";
   var STORE_KEY = "readingTrackerBooks";
@@ -743,6 +817,7 @@
     if(!book) return;
     book.favorite = !book.favorite;
     save();
+    cloudSetBook(book);
     renderAll();
   }
   ['readingCards','historyCards'].forEach(function(id){
@@ -899,6 +974,7 @@
     };
     books.push(book);
     save();
+    cloudSetBook(book);
     closeAdd();
     showAllReading = false;
     renderAll();
@@ -982,8 +1058,10 @@
   document.getElementById('editDelete').addEventListener('click', function(){
     if(!editingId) return;
     if(!confirm('ลบหนังสือเล่มนี้ออกจากรายการ?')) return;
+    var deletedId = editingId;
     books = books.filter(function(b){ return b.id !== editingId; });
     save();
+    cloudDeleteBook(deletedId);
     closeEdit();
     renderAll();
   });
@@ -1011,9 +1089,160 @@
     book.updatedAt = nowISO();
 
     save();
+    cloudSetBook(book);
     closeEdit();
     renderAll();
     switchView(book.status === 'finished' ? 'history' : 'reading');
+  });
+
+  /* ---------- shared merge logic (used by file import and cloud sync) ---------- */
+  function mergeIncoming(list){
+    var added = 0, updated = 0, changed = [];
+    list.forEach(function(ib){
+      if(!ib.id || !ib.title) return;
+      var existing = books.find(function(b){ return b.id === ib.id; });
+      if(!existing){
+        books.push(ib);
+        added++;
+        changed.push(ib);
+      } else if(new Date(ib.updatedAt) > new Date(existing.updatedAt)){
+        Object.assign(existing, ib);
+        updated++;
+        changed.push(existing);
+      }
+    });
+    return { added: added, updated: updated, changed: changed };
+  }
+
+  /* ---------- cloud sync (Firebase) ---------- */
+  var currentUser = null;
+  var unsubscribeSnapshot = null;
+
+  function cloudSetBook(book){
+    if(!currentUser) return;
+    var ref = doc(fbDb, 'users', currentUser.uid, 'books', book.id);
+    setDoc(ref, book).catch(function(err){
+      console.error('sync set error', err);
+      alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (ถ้าใช้รูปอัปโหลดขนาดใหญ่ ลองเปลี่ยนเป็นลิงก์ URL รูปแทน)');
+    });
+  }
+  function cloudDeleteBook(id){
+    if(!currentUser) return;
+    var ref = doc(fbDb, 'users', currentUser.uid, 'books', id);
+    deleteDoc(ref).catch(function(err){ console.error('sync delete error', err); });
+  }
+
+  function startCloudSync(user){
+    currentUser = user;
+    if(unsubscribeSnapshot) unsubscribeSnapshot();
+    var colRef = collection(fbDb, 'users', user.uid, 'books');
+    unsubscribeSnapshot = onSnapshot(colRef, function(snapshot){
+      var cloudBooks = [];
+      snapshot.forEach(function(docSnap){ cloudBooks.push(docSnap.data()); });
+
+      if(cloudBooks.length === 0 && books.length > 0){
+        books.forEach(cloudSetBook);
+        return;
+      }
+
+      var localOnly = books.filter(function(b){
+        return !cloudBooks.some(function(cb){ return cb.id === b.id; });
+      });
+      books = migrate(cloudBooks.map(function(b){ return Object.assign({}, b); }));
+      if(localOnly.length){
+        mergeIncoming(localOnly);
+        localOnly.forEach(cloudSetBook);
+      }
+      save();
+      showAllReading = false;
+      renderAll();
+    }, function(err){
+      console.error('cloud listener error', err);
+    });
+  }
+  function stopCloudSync(){
+    if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+    currentUser = null;
+  }
+
+  onAuthStateChanged(fbAuth, function(user){
+    var signedOutEl = document.getElementById('authSignedOut');
+    var signedInEl = document.getElementById('authSignedIn');
+    var syncDot = document.getElementById('syncDot');
+    if(user){
+      signedOutEl.hidden = true;
+      signedInEl.hidden = false;
+      syncDot.hidden = false;
+      document.getElementById('authEmail').textContent = 'เข้าสู่ระบบด้วย ' + (user.email || user.displayName || 'บัญชี Google');
+      startCloudSync(user);
+    } else {
+      signedOutEl.hidden = false;
+      signedInEl.hidden = true;
+      syncDot.hidden = true;
+      stopCloudSync();
+    }
+  });
+
+  document.getElementById('signInBtn').addEventListener('click', function(){
+    signInWithPopup(fbAuth, googleProvider).catch(function(err){
+      alert('เข้าสู่ระบบไม่สำเร็จ: ' + err.message);
+    });
+  });
+  document.getElementById('signOutBtn').addEventListener('click', function(){
+    signOut(fbAuth);
+  });
+
+  /* ---------- data transfer (export / import) ---------- */
+  var dataOverlay = document.getElementById('dataOverlay');
+  document.getElementById('dataBtn').addEventListener('click', function(){
+    dataOverlay.classList.add('open');
+  });
+  document.getElementById('dataCancel').addEventListener('click', function(){
+    dataOverlay.classList.remove('open');
+  });
+  dataOverlay.addEventListener('click', function(e){ if(e.target === dataOverlay) dataOverlay.classList.remove('open'); });
+
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    var payload = { app: "ReadLog", version: 1, exportedAt: nowISO(), books: books };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var d = new Date();
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    var datestr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'readlog-backup-' + datestr + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  });
+
+  document.getElementById('importFile').addEventListener('change', function(){
+    var fileInput = this;
+    var file = fileInput.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try{
+        var parsed = JSON.parse(reader.result);
+        var incoming = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.books) ? parsed.books : null);
+        if(!incoming) throw new Error("bad format");
+        incoming = migrate(incoming.map(function(b){ return Object.assign({}, b); }));
+
+        var result = mergeIncoming(incoming);
+        save();
+        result.changed.forEach(cloudSetBook);
+        showAllReading = false;
+        renderAll();
+        dataOverlay.classList.remove('open');
+        alert('นำเข้าสำเร็จ — เพิ่มใหม่ ' + result.added + ' เล่ม, อัปเดต ' + result.updated + ' เล่ม');
+      } catch(err){
+        alert('ไม่สามารถอ่านไฟล์นี้ได้ กรุณาเลือกไฟล์ .json ที่ส่งออกจาก ReadLog');
+      }
+      fileInput.value = "";
+    };
+    reader.readAsText(file);
   });
 
   /* ---------- seed & init ---------- */
