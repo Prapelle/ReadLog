@@ -74,7 +74,7 @@
     display:flex;
     align-items:center;
     gap:10px;
-    padding:20px 20px 8px;
+    padding:calc(20px + env(safe-area-inset-top)) 20px 8px;
     flex:none;
   }
   .topbar .logo{ flex:none; display:flex; }
@@ -96,7 +96,7 @@
     border:1.5px solid var(--surface);
   }
 
-  main.view{ padding:6px 20px 106px; flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  main.view{ padding:6px 20px calc(106px + env(safe-area-inset-bottom)); flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   main.view[hidden]{ display:none; }
 
   .view-head{ margin:10px 0 14px; }
@@ -258,7 +258,7 @@
   .fab{
     position:absolute;
     right:20px;
-    bottom:88px;
+    bottom:calc(88px + env(safe-area-inset-bottom));
     width:58px; height:58px;
     border-radius:50%;
     background:var(--green);
@@ -615,6 +615,15 @@ const googleProvider = new GoogleAuthProvider();
 
 (function(){
   "use strict";
+  // iOS standalone PWAs sometimes leave the layout viewport shifted after the
+  // on-screen keyboard opens/closes, making the header or bottom nav appear
+  // to float. Snapping scroll back to 0,0 whenever the visual viewport
+  // resizes keeps everything pinned in place.
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', function(){
+      window.scrollTo(0, 0);
+    });
+  }
   var STORE_KEY = "readingTrackerBooks";
   var HOME_LIMIT = 5;
   var books = migrate(load());
