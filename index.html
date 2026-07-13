@@ -42,6 +42,7 @@
     font-family:'Noto Sans Thai','Noto Sans','Segoe UI',sans-serif;
     height:100vh;
     height:100dvh;
+    height:var(--app-height, 100dvh);
     display:flex;
     justify-content:center;
     overflow:hidden;
@@ -58,6 +59,7 @@
     max-width:480px;
     height:100vh;
     height:100dvh;
+    height:var(--app-height, 100dvh);
     background:var(--paper);
     display:flex;
     flex-direction:column;
@@ -615,6 +617,21 @@ const googleProvider = new GoogleAuthProvider();
 
 (function(){
   "use strict";
+  // iOS Safari's 100dvh can be unreliable on first paint (it may freeze at a
+  // taller value before the browser chrome settles), leaving a gap of blank
+  // background below the bottom nav. Measuring the real visible height in JS
+  // and pinning it to a CSS variable keeps the app shell exactly full-screen.
+  function setAppHeight(){
+    var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', h + 'px');
+  }
+  setAppHeight();
+  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('orientationchange', function(){ setTimeout(setAppHeight, 100); });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', setAppHeight);
+  }
+
   // iOS standalone PWAs sometimes leave the layout viewport shifted after the
   // on-screen keyboard opens/closes, making the header or bottom nav appear
   // to float. Snapping scroll back to 0,0 whenever the visual viewport
