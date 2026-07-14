@@ -382,6 +382,21 @@
   .field-hint{ font-size:.74rem; color:var(--ink-soft); margin-top:6px; margin-bottom:10px; }
   .field .btn-primary, .field .file-btn.wide{ width:100%; display:block; }
 
+  .field textarea{
+    width:100%; padding:12px 14px;
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    font-size:.95rem; background:var(--surface-alt); color:var(--ink);
+    outline:none; resize:vertical; min-height:74px; font-family:inherit; line-height:1.5;
+  }
+  .field textarea:focus{ border-color:var(--green); }
+  .link-preview{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .link-chip{
+    display:inline-flex; align-items:center; gap:4px;
+    background:var(--green-wash); color:var(--green-dark);
+    padding:6px 10px; border-radius:999px; font-size:.8rem; font-weight:700;
+    text-decoration:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
   .sheet-actions{ display:flex; flex-direction:column; gap:10px; margin-top:18px; }
   .btn-primary{
     background:var(--green); color:#fff; border:none; padding:14px; border-radius:var(--radius-sm);
@@ -488,6 +503,11 @@
         </div>
         <div class="field-hint">เช่น นิยาย, กำลังใจ, ต้องอ่านซ้ำ</div>
       </div>
+      <div class="field">
+        <label>สรุป/บันทึกเพิ่มเติม (ไม่บังคับ)</label>
+        <textarea id="addSummary" rows="3" placeholder="พิมพ์สรุปหรือวางลิงก์ที่นี่..."></textarea>
+        <div class="link-preview" id="addSummaryLinks"></div>
+      </div>
       <div class="sheet-actions">
         <button type="submit" class="btn-primary">เพิ่มหนังสือ</button>
         <button type="button" class="btn-ghost" id="addCancel">ยกเลิก</button>
@@ -543,6 +563,11 @@
           <button type="button" data-status="reading">กำลังอ่าน</button>
           <button type="button" data-status="finished">อ่านจบ</button>
         </div>
+      </div>
+      <div class="field">
+        <label>สรุป/บันทึกเพิ่มเติม (ไม่บังคับ)</label>
+        <textarea id="editSummary" rows="3" placeholder="พิมพ์สรุปหรือวางลิงก์ที่นี่..."></textarea>
+        <div class="link-preview" id="editSummaryLinks"></div>
       </div>
       <div class="field" id="editRatingField" hidden>
         <label>ให้คะแนน</label>
@@ -672,6 +697,7 @@ const googleProvider = new GoogleAuthProvider();
       if(typeof b.progressValue !== "number") b.progressValue = parseInt(b.progressValue,10) || 0;
       if(!Array.isArray(b.tags)) b.tags = [];
       if(typeof b.favorite !== "boolean") b.favorite = false;
+      if(typeof b.summary !== "string") b.summary = "";
       return b;
     });
   }
@@ -710,6 +736,21 @@ const googleProvider = new GoogleAuthProvider();
     });
   }
   function escapeAttr(s){ return escapeHTML(s); }
+
+  function extractLinks(text){
+    var re = /(https?:\/\/[^\s]+)/gi;
+    return (text || "").match(re) || [];
+  }
+  function renderLinkPreview(containerId, text){
+    var container = document.getElementById(containerId);
+    var links = extractLinks(text);
+    if(!links.length){ container.innerHTML = ""; return; }
+    container.innerHTML = links.map(function(url){
+      var label = url;
+      try{ label = new URL(url).hostname.replace(/^www\./, ""); }catch(e){}
+      return '<a class="link-chip" href="'+ escapeAttr(url) +'" target="_blank" rel="noopener noreferrer">🔗 '+ escapeHTML(label) +'</a>';
+    }).join('');
+  }
 
   function tagChipsHTML(tags){
     if(!tags || !tags.length) return "";
@@ -950,6 +991,8 @@ const googleProvider = new GoogleAuthProvider();
       b.classList.toggle('active', b.dataset.unit === "บท");
     });
     addTags.set([]);
+    document.getElementById('addSummary').value = "";
+    renderLinkPreview('addSummaryLinks', "");
     addOverlay.classList.add('open');
     setTimeout(function(){ document.getElementById('addTitle').focus(); }, 50);
   }
@@ -958,6 +1001,9 @@ const googleProvider = new GoogleAuthProvider();
   document.getElementById('addFab').addEventListener('click', openAdd);
   document.getElementById('addCancel').addEventListener('click', closeAdd);
   addOverlay.addEventListener('click', function(e){ if(e.target === addOverlay) closeAdd(); });
+  document.getElementById('addSummary').addEventListener('input', function(){
+    renderLinkPreview('addSummaryLinks', this.value);
+  });
 
   document.getElementById('addCoverUrl').addEventListener('input', function(){
     addCoverDataUrl = "";
@@ -996,6 +1042,7 @@ const googleProvider = new GoogleAuthProvider();
       rating: 0,
       favorite: false,
       tags: addTags.get(),
+      summary: document.getElementById('addSummary').value.trim(),
       updatedAt: nowISO()
     };
     books.push(book);
@@ -1055,6 +1102,8 @@ const googleProvider = new GoogleAuthProvider();
     editCoverDataUrl = book.coverImage && book.coverImage.indexOf('data:') === 0 ? book.coverImage : "";
     document.getElementById('editCoverPreview').innerHTML = book.coverImage ? '<img src="'+ escapeAttr(book.coverImage) +'">' : '📖';
     editTags.set(book.tags || []);
+    document.getElementById('editSummary').value = book.summary || "";
+    renderLinkPreview('editSummaryLinks', book.summary || "");
     setEditStatus(book.status);
     paintRating(book.rating || 0);
     editOverlay.classList.add('open');
@@ -1063,6 +1112,9 @@ const googleProvider = new GoogleAuthProvider();
 
   document.getElementById('editCancel').addEventListener('click', closeEdit);
   editOverlay.addEventListener('click', function(e){ if(e.target === editOverlay) closeEdit(); });
+  document.getElementById('editSummary').addEventListener('input', function(){
+    renderLinkPreview('editSummaryLinks', this.value);
+  });
 
   document.getElementById('editCoverUrl').addEventListener('input', function(){
     editCoverDataUrl = "";
@@ -1112,6 +1164,7 @@ const googleProvider = new GoogleAuthProvider();
     book.status = statusBtn ? statusBtn.dataset.status : book.status;
     book.rating = book.status === 'finished' ? editRatingValue : book.rating;
     book.tags = editTags.get();
+    book.summary = document.getElementById('editSummary').value.trim();
     book.updatedAt = nowISO();
 
     save();
@@ -1274,7 +1327,7 @@ const googleProvider = new GoogleAuthProvider();
   /* ---------- seed & init ---------- */
   if(books.length === 0){
     books = [
-      { id: uid(), title: "เจ้าชายน้อย", coverImage: "", progressUnit: "บท", progressValue: 7, status: "reading", rating: 0, tags: ["นิยาย","แปล"], updatedAt: new Date(Date.now() - 1000*60*60*3).toISOString() },
+      { id: uid(), title: "เจ้าชายน้อย", coverImage: "", progressUnit: "บท", progressValue: 7, status: "reading", rating: 0, tags: ["นิยาย","แปล"], summary: "หนังสือแปลที่อ่านง่าย เหมาะเก็บไว้อ่านซ้ำ ข้อมูลเพิ่มเติม https://www.goodreads.com/book/show/157993", updatedAt: new Date(Date.now() - 1000*60*60*3).toISOString() },
       { id: uid(), title: "บ้านเล็กในป่าใหญ่", coverImage: "", progressUnit: "เล่ม", progressValue: 2, status: "reading", rating: 0, tags: ["ครอบครัว"], updatedAt: new Date(Date.now() - 1000*60*60*24*2).toISOString() },
       { id: uid(), title: "แม่น้ำสายที่สาม", coverImage: "", progressUnit: "บท", progressValue: 0, status: "finished", rating: 4, tags: ["สั้น","แนะนำ"], updatedAt: new Date(Date.now() - 1000*60*60*24*10).toISOString() }
     ];
