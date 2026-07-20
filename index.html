@@ -199,6 +199,14 @@
   }
   .info .sub{ font-size:.82rem; color:var(--green-dark); font-weight:500; }
   .info .stars{ font-size:.82rem; color:var(--gold); letter-spacing:1px; }
+  .continue-btn{
+    align-self:flex-start;
+    margin-top:4px;
+    background:var(--green-wash); color:var(--green-dark);
+    border:none; padding:5px 11px; border-radius:999px;
+    font-size:.74rem; font-weight:700;
+  }
+  .continue-btn:active{ background:var(--line); }
   .info .meta-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:2px; }
   .info .date{ font-size:.74rem; color:var(--ink-soft); flex:none; }
   .tag-chips{ display:flex; gap:4px; overflow:hidden; justify-content:flex-end; }
@@ -552,6 +560,11 @@
         </div>
       </div>
       <div class="field">
+        <label>ลิงก์อ่านต่อ (ไม่บังคับ)</label>
+        <input type="url" id="editContinueLink" placeholder="วางลิงก์ตอนที่กำลังอ่านอยู่ตอนนี้">
+        <div class="field-hint">ระบบจะขยับเลขบท/เล่ม/หน้าในลิงก์ไปตอนถัดไปให้อัตโนมัติทุกครั้งที่กด "อ่านต่อ" บนการ์ด (ใช้ได้เมื่อลิงก์มีเลขเดียวกับที่ตั้งไว้ด้านบน)</div>
+      </div>
+      <div class="field">
         <label>แท็ก (ไม่บังคับ)</label>
         <div class="tag-input-wrap" id="editTagWrap">
           <input type="text" id="editTagInput" placeholder="พิมพ์แท็กแล้วกด Enter">
@@ -583,6 +596,27 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- CONTINUE READING CONFIRM SHEET -->
+<div class="overlay" id="continueConfirmOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>อัปเดตความคืบหน้า</h2>
+    <div class="field">
+      <label id="continueConfirmBookTitle"></label>
+      <div class="field-hint">อ่านไปกี่บท/เล่ม/หน้าจากตอนที่เปิดไปอ่าน?</div>
+      <div class="stepper">
+        <button type="button" class="step-btn" id="continueConfirmMinus">−</button>
+        <input type="number" id="continueConfirmValue" value="1" min="1" inputmode="numeric">
+        <button type="button" class="step-btn" id="continueConfirmPlus">+</button>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn-primary" id="continueConfirmSave">บันทึก</button>
+      <button type="button" class="btn-ghost" id="continueConfirmSkip">ยังไม่ได้อ่าน / ข้าม</button>
+    </div>
   </div>
 </div>
 
@@ -698,6 +732,8 @@ const googleProvider = new GoogleAuthProvider();
       if(!Array.isArray(b.tags)) b.tags = [];
       if(typeof b.favorite !== "boolean") b.favorite = false;
       if(typeof b.summary !== "string") b.summary = "";
+      if(typeof b.continueLink !== "string") b.continueLink = "";
+      if(typeof b.continueLinkAtValue !== "number") b.continueLinkAtValue = b.progressValue || 0;
       return b;
     });
   }
@@ -764,6 +800,7 @@ const googleProvider = new GoogleAuthProvider();
   function cardHTML(book, mode){
     var ribbon = "";
     var subLine = "";
+    var continueBtn = "";
     var label = progressLabel(book);
     if(mode === "history"){
       var stars = "";
@@ -772,6 +809,9 @@ const googleProvider = new GoogleAuthProvider();
     } else {
       if(label){ ribbon = '<span class="ribbon">'+ escapeHTML(label) +'</span>'; }
       subLine = label ? '<div class="sub">'+ escapeHTML(label) +'</div>' : '<div class="sub">ยังไม่ระบุความคืบหน้า</div>';
+      if(book.continueLink){
+        continueBtn = '<button class="continue-btn" type="button" data-continue-id="'+ book.id +'">📖 อ่านต่อ</button>';
+      }
     }
     return (
       '<div class="book-card" data-id="'+ book.id +'" tabindex="0" role="button">' +
@@ -780,6 +820,7 @@ const googleProvider = new GoogleAuthProvider();
         '<div class="info">' +
           '<div class="title">'+ escapeHTML(book.title) +'</div>' +
           subLine +
+          continueBtn +
           '<div class="meta-row">' +
             '<div class="date">อัปเดต '+ formatDate(book.updatedAt) +'</div>' +
             tagChipsHTML(book.tags) +
@@ -878,7 +919,7 @@ const googleProvider = new GoogleAuthProvider();
   document.getElementById('readingSearch').addEventListener('input', renderReading);
   document.getElementById('historySearch').addEventListener('input', renderHistory);
 
-  /* card tap -> open edit / favorite star -> toggle */
+  /* card tap -> open edit / favorite star -> toggle / continue reading */
   function toggleFavorite(id){
     var book = books.find(function(b){ return b.id === id; });
     if(!book) return;
@@ -887,6 +928,67 @@ const googleProvider = new GoogleAuthProvider();
     cloudSetBook(book);
     renderAll();
   }
+  function deriveNextLink(book, newValue){
+    var base = String(book.continueLinkAtValue);
+    var escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp('\\b' + escaped + '\\b');
+    if(re.test(book.continueLink)){
+      return book.continueLink.replace(re, String(newValue));
+    }
+    return book.continueLink;
+  }
+  var pendingContinue = null;
+  function handleContinueReading(id){
+    var book = books.find(function(b){ return b.id === id; });
+    if(!book || !book.continueLink) return;
+    window.open(book.continueLink, '_blank', 'noopener,noreferrer');
+    pendingContinue = { id: id, fromValue: book.progressValue || 0, setAt: Date.now() };
+  }
+  function maybeOpenContinueConfirm(){
+    if(!pendingContinue) return;
+    if(Date.now() - pendingContinue.setAt < 800) return;
+    var book = books.find(function(b){ return b.id === pendingContinue.id; });
+    if(!book){ pendingContinue = null; return; }
+    document.getElementById('continueConfirmBookTitle').textContent = book.title;
+    document.getElementById('continueConfirmValue').value = 1;
+    document.getElementById('continueConfirmOverlay').classList.add('open');
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible') maybeOpenContinueConfirm();
+  });
+  window.addEventListener('focus', maybeOpenContinueConfirm);
+
+  document.getElementById('continueConfirmMinus').addEventListener('click', function(){
+    var inp = document.getElementById('continueConfirmValue');
+    inp.value = Math.max(1, (parseInt(inp.value, 10) || 1) - 1);
+  });
+  document.getElementById('continueConfirmPlus').addEventListener('click', function(){
+    var inp = document.getElementById('continueConfirmValue');
+    inp.value = (parseInt(inp.value, 10) || 1) + 1;
+  });
+  document.getElementById('continueConfirmSkip').addEventListener('click', function(){
+    document.getElementById('continueConfirmOverlay').classList.remove('open');
+    pendingContinue = null;
+  });
+  document.getElementById('continueConfirmSave').addEventListener('click', function(){
+    if(!pendingContinue) return;
+    var book = books.find(function(b){ return b.id === pendingContinue.id; });
+    if(book){
+      var amount = Math.max(1, parseInt(document.getElementById('continueConfirmValue').value, 10) || 1);
+      var newValue = pendingContinue.fromValue + amount;
+      var nextLink = deriveNextLink(book, newValue);
+      book.progressValue = newValue;
+      book.continueLink = nextLink;
+      book.continueLinkAtValue = newValue;
+      book.updatedAt = nowISO();
+      save();
+      cloudSetBook(book);
+      showAllReading = false;
+      renderAll();
+    }
+    document.getElementById('continueConfirmOverlay').classList.remove('open');
+    pendingContinue = null;
+  });
   ['readingCards','historyCards'].forEach(function(id){
     var container = document.getElementById(id);
     container.addEventListener('click', function(e){
@@ -894,6 +996,12 @@ const googleProvider = new GoogleAuthProvider();
       if(favBtn){
         e.stopPropagation();
         toggleFavorite(favBtn.dataset.favId);
+        return;
+      }
+      var continueBtn = e.target.closest('.continue-btn');
+      if(continueBtn){
+        e.stopPropagation();
+        handleContinueReading(continueBtn.dataset.continueId);
         return;
       }
       var card = e.target.closest('.book-card');
@@ -1043,6 +1151,8 @@ const googleProvider = new GoogleAuthProvider();
       favorite: false,
       tags: addTags.get(),
       summary: document.getElementById('addSummary').value.trim(),
+      continueLink: "",
+      continueLinkAtValue: value,
       updatedAt: nowISO()
     };
     books.push(book);
@@ -1097,6 +1207,7 @@ const googleProvider = new GoogleAuthProvider();
     document.querySelectorAll('#editUnit button').forEach(function(b){
       b.classList.toggle('active', b.dataset.unit === editUnitVal);
     });
+    document.getElementById('editContinueLink').value = book.continueLink || "";
 
     document.getElementById('editCoverUrl').value = book.coverImage && book.coverImage.indexOf('data:') !== 0 ? book.coverImage : "";
     editCoverDataUrl = book.coverImage && book.coverImage.indexOf('data:') === 0 ? book.coverImage : "";
@@ -1165,6 +1276,13 @@ const googleProvider = new GoogleAuthProvider();
     book.rating = book.status === 'finished' ? editRatingValue : book.rating;
     book.tags = editTags.get();
     book.summary = document.getElementById('editSummary').value.trim();
+
+    var newContinueLink = document.getElementById('editContinueLink').value.trim();
+    if(newContinueLink !== (book.continueLink || "")){
+      book.continueLink = newContinueLink;
+      book.continueLinkAtValue = book.progressValue;
+    }
+
     book.updatedAt = nowISO();
 
     save();
