@@ -199,9 +199,9 @@
   }
   .info .sub{ font-size:.82rem; color:var(--green-dark); font-weight:500; }
   .info .stars{ font-size:.82rem; color:var(--gold); letter-spacing:1px; }
+  .continue-row{ display:flex; justify-content:flex-end; margin-top:2px; }
   .continue-btn{
-    align-self:flex-start;
-    margin-top:4px;
+    flex:none;
     background:var(--green-wash); color:var(--green-dark);
     border:none; padding:5px 11px; border-radius:999px;
     font-size:.74rem; font-weight:700;
@@ -820,7 +820,7 @@ const googleProvider = new GoogleAuthProvider();
         '<div class="info">' +
           '<div class="title">'+ escapeHTML(book.title) +'</div>' +
           subLine +
-          continueBtn +
+          (continueBtn ? '<div class="continue-row">' + continueBtn + '</div>' : '') +
           '<div class="meta-row">' +
             '<div class="date">อัปเดต '+ formatDate(book.updatedAt) +'</div>' +
             tagChipsHTML(book.tags) +
