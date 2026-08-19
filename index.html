@@ -653,26 +653,20 @@
 </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import {
-  getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyAQ5hdm-M12YsyvRoMGDretP563pYTL1-I",
-  authDomain: "readlog-73f9f.firebaseapp.com",
-  projectId: "readlog-73f9f",
-  storageBucket: "readlog-73f9f.firebasestorage.app",
-  messagingSenderId: "568301708206",
-  appId: "1:568301708206:web:4da07de92f37089c12de3f"
+"use strict";
+// Cloud sync (Firebase) is loaded asynchronously further down via dynamic
+// import(), specifically so that a network failure, ad-blocker, or offline
+// state can NEVER stop the rest of the app from working. Every part of the
+// app below talks to cloud sync only through this object; until (and unless)
+// Firebase finishes loading successfully, its methods are safe no-ops.
+var cloud = {
+  ready: false,
+  setBook: function(){},
+  deleteBook: function(){}
 };
-const fbApp = initializeApp(firebaseConfig);
-const fbAuth = getAuth(fbApp);
-const fbDb = getFirestore(fbApp);
-const googleProvider = new GoogleAuthProvider();
+// Populated by the core app IIFE below with the bits of its internal state
+// that the (separately-loaded) cloud sync module needs to read or trigger.
+var app = {};
 
 (function(){
   "use strict";
@@ -924,7 +918,7 @@ const googleProvider = new GoogleAuthProvider();
     if(!book) return;
     book.favorite = !book.favorite;
     save();
-    cloudSetBook(book);
+    cloud.setBook(book);
     renderAll();
   }
   function deriveNextLink(book, newValue){
@@ -981,7 +975,7 @@ const googleProvider = new GoogleAuthProvider();
       book.continueLinkAtValue = newValue;
       book.updatedAt = nowISO();
       save();
-      cloudSetBook(book);
+      cloud.setBook(book);
       showAllReading = false;
       renderAll();
     }
@@ -1156,7 +1150,7 @@ const googleProvider = new GoogleAuthProvider();
     };
     books.push(book);
     save();
-    cloudSetBook(book);
+    cloud.setBook(book);
     closeAdd();
     showAllReading = false;
     renderAll();
@@ -1249,7 +1243,7 @@ const googleProvider = new GoogleAuthProvider();
     var deletedId = editingId;
     books = books.filter(function(b){ return b.id !== editingId; });
     save();
-    cloudDeleteBook(deletedId);
+    cloud.deleteBook(deletedId);
     closeEdit();
     renderAll();
   });
@@ -1285,7 +1279,7 @@ const googleProvider = new GoogleAuthProvider();
     book.updatedAt = nowISO();
 
     save();
-    cloudSetBook(book);
+    cloud.setBook(book);
     closeEdit();
     renderAll();
     switchView(book.status === 'finished' ? 'history' : 'reading');
@@ -1310,83 +1304,15 @@ const googleProvider = new GoogleAuthProvider();
     return { added: added, updated: updated, changed: changed };
   }
 
-  /* ---------- cloud sync (Firebase) ---------- */
-  var currentUser = null;
-  var unsubscribeSnapshot = null;
-
-  function cloudSetBook(book){
-    if(!currentUser) return;
-    var ref = doc(fbDb, 'users', currentUser.uid, 'books', book.id);
-    setDoc(ref, book).catch(function(err){
-      console.error('sync set error', err);
-      alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (ถ้าใช้รูปอัปโหลดขนาดใหญ่ ลองเปลี่ยนเป็นลิงก์ URL รูปแทน)');
-    });
-  }
-  function cloudDeleteBook(id){
-    if(!currentUser) return;
-    var ref = doc(fbDb, 'users', currentUser.uid, 'books', id);
-    deleteDoc(ref).catch(function(err){ console.error('sync delete error', err); });
-  }
-
-  function startCloudSync(user){
-    currentUser = user;
-    if(unsubscribeSnapshot) unsubscribeSnapshot();
-    var colRef = collection(fbDb, 'users', user.uid, 'books');
-    unsubscribeSnapshot = onSnapshot(colRef, function(snapshot){
-      var cloudBooks = [];
-      snapshot.forEach(function(docSnap){ cloudBooks.push(docSnap.data()); });
-
-      if(cloudBooks.length === 0 && books.length > 0){
-        books.forEach(cloudSetBook);
-        return;
-      }
-
-      var localOnly = books.filter(function(b){
-        return !cloudBooks.some(function(cb){ return cb.id === b.id; });
-      });
-      books = migrate(cloudBooks.map(function(b){ return Object.assign({}, b); }));
-      if(localOnly.length){
-        mergeIncoming(localOnly);
-        localOnly.forEach(cloudSetBook);
-      }
-      save();
-      showAllReading = false;
-      renderAll();
-    }, function(err){
-      console.error('cloud listener error', err);
-    });
-  }
-  function stopCloudSync(){
-    if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
-    currentUser = null;
-  }
-
-  onAuthStateChanged(fbAuth, function(user){
-    var signedOutEl = document.getElementById('authSignedOut');
-    var signedInEl = document.getElementById('authSignedIn');
-    var syncDot = document.getElementById('syncDot');
-    if(user){
-      signedOutEl.hidden = true;
-      signedInEl.hidden = false;
-      syncDot.hidden = false;
-      document.getElementById('authEmail').textContent = 'เข้าสู่ระบบด้วย ' + (user.email || user.displayName || 'บัญชี Google');
-      startCloudSync(user);
-    } else {
-      signedOutEl.hidden = false;
-      signedInEl.hidden = true;
-      syncDot.hidden = true;
-      stopCloudSync();
-    }
-  });
-
-  document.getElementById('signInBtn').addEventListener('click', function(){
-    signInWithPopup(fbAuth, googleProvider).catch(function(err){
-      alert('เข้าสู่ระบบไม่สำเร็จ: ' + err.message);
-    });
-  });
-  document.getElementById('signOutBtn').addEventListener('click', function(){
-    signOut(fbAuth);
-  });
+  // Exposes what the (separately-loaded) cloud sync module needs, without
+  // that module ever needing direct access to this closure's variables.
+  app.getBooks = function(){ return books; };
+  app.setBooks = function(arr){ books = arr; };
+  app.migrate = migrate;
+  app.mergeIncoming = mergeIncoming;
+  app.save = save;
+  app.renderAll = renderAll;
+  app.resetShowAll = function(){ showAllReading = false; };
 
   /* ---------- data transfer (export / import) ---------- */
   var dataOverlay = document.getElementById('dataOverlay');
@@ -1428,7 +1354,7 @@ const googleProvider = new GoogleAuthProvider();
 
         var result = mergeIncoming(incoming);
         save();
-        result.changed.forEach(cloudSetBook);
+        result.changed.forEach(cloud.setBook);
         showAllReading = false;
         renderAll();
         dataOverlay.classList.remove('open');
@@ -1452,6 +1378,133 @@ const googleProvider = new GoogleAuthProvider();
   }
 
   renderAll();
+})();
+
+// ---------- cloud sync (Firebase), loaded independently ----------
+// If this fails for any reason (offline, blocked, Firebase outage), the
+// catch block below keeps the sign-in button honest about it while the rest
+// of the app above continues working normally on local storage alone.
+(async function(){
+  try {
+    var appMod = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js");
+    var authMod = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js");
+    var fsMod = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js");
+
+    var initializeApp = appMod.initializeApp;
+    var getAuth = authMod.getAuth;
+    var GoogleAuthProvider = authMod.GoogleAuthProvider;
+    var signInWithPopup = authMod.signInWithPopup;
+    var signOut = authMod.signOut;
+    var onAuthStateChanged = authMod.onAuthStateChanged;
+    var getFirestore = fsMod.getFirestore;
+    var doc = fsMod.doc;
+    var setDoc = fsMod.setDoc;
+    var deleteDoc = fsMod.deleteDoc;
+    var collection = fsMod.collection;
+    var onSnapshot = fsMod.onSnapshot;
+
+    var firebaseConfig = {
+      apiKey: "AIzaSyAQ5hdm-M12YsyvRoMGDretP563pYTL1-I",
+      authDomain: "readlog-73f9f.firebaseapp.com",
+      projectId: "readlog-73f9f",
+      storageBucket: "readlog-73f9f.firebasestorage.app",
+      messagingSenderId: "568301708206",
+      appId: "1:568301708206:web:4da07de92f37089c12de3f"
+    };
+    var fbApp = initializeApp(firebaseConfig);
+    var fbAuth = getAuth(fbApp);
+    var fbDb = getFirestore(fbApp);
+    var googleProvider = new GoogleAuthProvider();
+
+    var currentUser = null;
+    var unsubscribeSnapshot = null;
+
+    function cloudSetBook(book){
+      if(!currentUser) return;
+      var ref = doc(fbDb, 'users', currentUser.uid, 'books', book.id);
+      setDoc(ref, book).catch(function(err){
+        console.error('sync set error', err);
+        alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (ถ้าใช้รูปอัปโหลดขนาดใหญ่ ลองเปลี่ยนเป็นลิงก์ URL รูปแทน)');
+      });
+    }
+    function cloudDeleteBook(id){
+      if(!currentUser) return;
+      var ref = doc(fbDb, 'users', currentUser.uid, 'books', id);
+      deleteDoc(ref).catch(function(err){ console.error('sync delete error', err); });
+    }
+    cloud.setBook = cloudSetBook;
+    cloud.deleteBook = cloudDeleteBook;
+    cloud.ready = true;
+
+    function startCloudSync(user){
+      currentUser = user;
+      if(unsubscribeSnapshot) unsubscribeSnapshot();
+      var colRef = collection(fbDb, 'users', user.uid, 'books');
+      unsubscribeSnapshot = onSnapshot(colRef, function(snapshot){
+        var cloudBooks = [];
+        snapshot.forEach(function(docSnap){ cloudBooks.push(docSnap.data()); });
+
+        var currentBooks = app.getBooks();
+        if(cloudBooks.length === 0 && currentBooks.length > 0){
+          currentBooks.forEach(cloudSetBook);
+          return;
+        }
+
+        var localOnly = currentBooks.filter(function(b){
+          return !cloudBooks.some(function(cb){ return cb.id === b.id; });
+        });
+        app.setBooks(app.migrate(cloudBooks.map(function(b){ return Object.assign({}, b); })));
+        if(localOnly.length){
+          app.mergeIncoming(localOnly);
+          localOnly.forEach(cloudSetBook);
+        }
+        app.save();
+        app.resetShowAll();
+        app.renderAll();
+      }, function(err){
+        console.error('cloud listener error', err);
+      });
+    }
+    function stopCloudSync(){
+      if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+      currentUser = null;
+    }
+
+    onAuthStateChanged(fbAuth, function(user){
+      var signedOutEl = document.getElementById('authSignedOut');
+      var signedInEl = document.getElementById('authSignedIn');
+      var syncDot = document.getElementById('syncDot');
+      if(user){
+        signedOutEl.hidden = true;
+        signedInEl.hidden = false;
+        syncDot.hidden = false;
+        document.getElementById('authEmail').textContent = 'เข้าสู่ระบบด้วย ' + (user.email || user.displayName || 'บัญชี Google');
+        startCloudSync(user);
+      } else {
+        signedOutEl.hidden = false;
+        signedInEl.hidden = true;
+        syncDot.hidden = true;
+        stopCloudSync();
+      }
+    });
+
+    document.getElementById('signInBtn').addEventListener('click', function(){
+      signInWithPopup(fbAuth, googleProvider).catch(function(err){
+        alert('เข้าสู่ระบบไม่สำเร็จ: ' + err.message);
+      });
+    });
+    document.getElementById('signOutBtn').addEventListener('click', function(){
+      signOut(fbAuth);
+    });
+  } catch(err) {
+    console.error('Firebase failed to load — cloud sync unavailable:', err);
+    var signInBtn = document.getElementById('signInBtn');
+    if(signInBtn){
+      signInBtn.addEventListener('click', function(){
+        alert('เชื่อมต่อระบบซิงก์ไม่สำเร็จตอนนี้ (อาจเป็นเพราะอินเทอร์เน็ตหรือถูกบล็อก) แอปยังใช้งานได้ตามปกติแบบออฟไลน์ ลองรีเฟรชหน้าใหม่อีกครั้งภายหลัง');
+      });
+    }
+  }
 })();
 </script>
 </body>
