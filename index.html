@@ -707,7 +707,13 @@ var app = {};
     }catch(e){ return []; }
   }
   function save(){
-    localStorage.setItem(STORE_KEY, JSON.stringify(books));
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(books));
+      return true;
+    }catch(e){
+      console.error('save failed', e);
+      return false;
+    }
   }
   function migrate(list){
     return list.map(function(b){
@@ -1073,6 +1079,37 @@ var app = {};
   var addTags = makeTagController('addTagWrap', 'addTagInput');
   var editTags = makeTagController('editTagWrap', 'editTagInput');
 
+  /* ---------- shared: compress uploaded cover photos ---------- */
+  // Phone camera photos are often several MB — far too large to store safely
+  // in localStorage (a few MB total budget) or sync to Firestore (1MB per
+  // document). Downscaling and re-encoding as JPEG keeps covers looking fine
+  // while using a tiny fraction of the space.
+  function resizeImageFile(file, callback){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        var maxDim = 480;
+        var w = img.width, h = img.height;
+        if(w > h && w > maxDim){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else if(h >= w && h > maxDim){ w = Math.round(w * maxDim / h); h = maxDim; }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        try{
+          callback(canvas.toDataURL('image/jpeg', 0.72));
+        }catch(err){
+          callback(null);
+        }
+      };
+      img.onerror = function(){ callback(null); };
+      img.src = e.target.result;
+    };
+    reader.onerror = function(){ callback(null); };
+    reader.readAsDataURL(file);
+  }
+
   /* ---------- add sheet ---------- */
   var addOverlay = document.getElementById('addOverlay');
   var addCoverDataUrl = "";
@@ -1114,13 +1151,12 @@ var app = {};
   document.getElementById('addCoverFile').addEventListener('change', function(){
     var file = this.files[0];
     if(!file) return;
-    var reader = new FileReader();
-    reader.onload = function(){
-      addCoverDataUrl = reader.result;
+    compressCoverImage(file, function(dataUrl){
+      if(!dataUrl) return;
+      addCoverDataUrl = dataUrl;
       document.getElementById('addCoverUrl').value = "";
       document.getElementById('addCoverPreview').innerHTML = '<img src="'+ addCoverDataUrl +'">';
-    };
-    reader.readAsDataURL(file);
+    });
   });
 
   document.getElementById('addForm').addEventListener('submit', function(e){
@@ -1220,6 +1256,42 @@ var app = {};
     renderLinkPreview('editSummaryLinks', this.value);
   });
 
+  /* ---------- cover image compression ---------- */
+  // Camera photos are routinely several MB — stored raw as base64 they can
+  // blow past localStorage's quota (silently failing) or Firestore's 1MB
+  // per-document limit (also failing, sometimes even synchronously). Downscale
+  // and re-encode every uploaded cover so this never becomes a problem.
+  function compressCoverImage(file, callback){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var img = new Image();
+      img.onload = function(){
+        var maxDim = 640;
+        var w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        var dataUrl;
+        try{
+          dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        }catch(err){
+          dataUrl = reader.result;
+        }
+        callback(dataUrl);
+      };
+      img.onerror = function(){ callback(reader.result); };
+      img.src = reader.result;
+    };
+    reader.onerror = function(){ callback(null); };
+    reader.readAsDataURL(file);
+  }
+
   document.getElementById('editCoverUrl').addEventListener('input', function(){
     editCoverDataUrl = "";
     var url = this.value.trim();
@@ -1228,13 +1300,12 @@ var app = {};
   document.getElementById('editCoverFile').addEventListener('change', function(){
     var file = this.files[0];
     if(!file) return;
-    var reader = new FileReader();
-    reader.onload = function(){
-      editCoverDataUrl = reader.result;
+    compressCoverImage(file, function(dataUrl){
+      if(!dataUrl) return;
+      editCoverDataUrl = dataUrl;
       document.getElementById('editCoverUrl').value = "";
       document.getElementById('editCoverPreview').innerHTML = '<img src="'+ editCoverDataUrl +'">';
-    };
-    reader.readAsDataURL(file);
+    });
   });
 
   document.getElementById('editDelete').addEventListener('click', function(){
@@ -1421,16 +1492,28 @@ var app = {};
 
     function cloudSetBook(book){
       if(!currentUser) return;
-      var ref = doc(fbDb, 'users', currentUser.uid, 'books', book.id);
-      setDoc(ref, book).catch(function(err){
-        console.error('sync set error', err);
-        alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (ถ้าใช้รูปอัปโหลดขนาดใหญ่ ลองเปลี่ยนเป็นลิงก์ URL รูปแทน)');
-      });
+      try{
+        var ref = doc(fbDb, 'users', currentUser.uid, 'books', book.id);
+        setDoc(ref, book).catch(function(err){
+          console.error('sync set error', err);
+          alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (ถ้าใช้รูปอัปโหลดขนาดใหญ่ ลองเปลี่ยนเป็นลิงก์ URL รูปแทน)');
+        });
+      } catch(err){
+        // Some SDK versions validate document size synchronously and throw
+        // immediately rather than rejecting a promise — never let that take
+        // down the caller (e.g. the add/edit form handler).
+        console.error('sync set threw synchronously', err);
+        alert('ซิงก์เล่ม "' + book.title + '" ไม่สำเร็จ (รูปอาจใหญ่เกินไป) แต่บันทึกในเครื่องเรียบร้อยแล้ว');
+      }
     }
     function cloudDeleteBook(id){
       if(!currentUser) return;
-      var ref = doc(fbDb, 'users', currentUser.uid, 'books', id);
-      deleteDoc(ref).catch(function(err){ console.error('sync delete error', err); });
+      try{
+        var ref = doc(fbDb, 'users', currentUser.uid, 'books', id);
+        deleteDoc(ref).catch(function(err){ console.error('sync delete error', err); });
+      } catch(err){
+        console.error('sync delete threw synchronously', err);
+      }
     }
     cloud.setBook = cloudSetBook;
     cloud.deleteBook = cloudDeleteBook;
