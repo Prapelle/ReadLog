@@ -98,6 +98,19 @@
     background:var(--green);
     border:1.5px solid var(--surface);
   }
+  .sync-dot.syncing{ background:var(--gold); animation:sync-pulse 1s ease-in-out infinite; }
+  @keyframes sync-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+  .data-banner{
+    display:flex; align-items:center; gap:8px;
+    background:var(--green-wash); color:var(--green-dark);
+    font-size:.78rem; font-weight:600;
+    padding:8px 14px; margin:0 20px 10px;
+    border-radius:var(--radius-sm);
+  }
+  .data-banner .dot{
+    width:7px; height:7px; border-radius:50%; background:var(--gold); flex:none;
+    animation:sync-pulse 1s ease-in-out infinite;
+  }
 
   main.view{ padding:6px 20px calc(106px + env(safe-area-inset-bottom)); flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   main.view[hidden]{ display:none; }
@@ -439,6 +452,7 @@
 
   <!-- READING (default landing) -->
   <main class="view" id="view-reading">
+    <div class="data-banner" id="syncBanner" hidden><span class="dot"></span>กำลังตรวจสอบข้อมูลล่าสุด...</div>
     <div class="search-bar">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input type="text" id="readingSearch" placeholder="ค้นหาหนังสือหรือแท็ก...">
@@ -1472,6 +1486,8 @@ var app = {};
     var signOut = authMod.signOut;
     var onAuthStateChanged = authMod.onAuthStateChanged;
     var getFirestore = fsMod.getFirestore;
+    var initializeFirestore = fsMod.initializeFirestore;
+    var persistentLocalCache = fsMod.persistentLocalCache;
     var doc = fsMod.doc;
     var setDoc = fsMod.setDoc;
     var deleteDoc = fsMod.deleteDoc;
@@ -1488,7 +1504,17 @@ var app = {};
     };
     var fbApp = initializeApp(firebaseConfig);
     var fbAuth = getAuth(fbApp);
-    var fbDb = getFirestore(fbApp);
+    // A persistent local cache means every load after the first serves
+    // instantly from on-device storage (IndexedDB) while Firestore syncs
+    // any changes in the background, instead of every page load waiting on
+    // a fresh network round trip just to show data that hasn't changed.
+    var fbDb;
+    try{
+      fbDb = initializeFirestore(fbApp, { localCache: persistentLocalCache() });
+    }catch(err){
+      console.error('persistent Firestore cache unavailable, falling back', err);
+      fbDb = getFirestore(fbApp);
+    }
     var googleProvider = new GoogleAuthProvider();
 
     var currentUser = null;
@@ -1523,9 +1549,21 @@ var app = {};
     cloud.deleteBook = cloudDeleteBook;
     cloud.ready = true;
 
+    function setSyncingVisual(on){
+      var banner = document.getElementById('syncBanner');
+      var dot = document.getElementById('syncDot');
+      if(banner) banner.hidden = !on;
+      if(dot) dot.classList.toggle('syncing', on);
+    }
     function startCloudSync(user){
       currentUser = user;
       if(unsubscribeSnapshot) unsubscribeSnapshot();
+      // What's on screen right now is whatever this device had cached locally
+      // last time — possibly stale if another device made changes since. Show
+      // that clearly instead of leaving the person guessing why nothing's
+      // moved, and only clear it once Firestore confirms this is the actual
+      // latest from the server (not just a replay of local cache).
+      setSyncingVisual(true);
       var colRef = collection(fbDb, 'users', user.uid, 'books');
       unsubscribeSnapshot = onSnapshot(colRef, function(snapshot){
         var cloudBooks = [];
@@ -1534,27 +1572,32 @@ var app = {};
         var currentBooks = app.getBooks();
         if(cloudBooks.length === 0 && currentBooks.length > 0){
           currentBooks.forEach(cloudSetBook);
-          return;
+        } else {
+          var localOnly = currentBooks.filter(function(b){
+            return !cloudBooks.some(function(cb){ return cb.id === b.id; });
+          });
+          app.setBooks(app.migrate(cloudBooks.map(function(b){ return Object.assign({}, b); })));
+          if(localOnly.length){
+            app.mergeIncoming(localOnly);
+            localOnly.forEach(cloudSetBook);
+          }
+          app.save();
+          app.resetShowAll();
+          app.renderAll();
         }
 
-        var localOnly = currentBooks.filter(function(b){
-          return !cloudBooks.some(function(cb){ return cb.id === b.id; });
-        });
-        app.setBooks(app.migrate(cloudBooks.map(function(b){ return Object.assign({}, b); })));
-        if(localOnly.length){
-          app.mergeIncoming(localOnly);
-          localOnly.forEach(cloudSetBook);
+        if(!snapshot.metadata.fromCache){
+          setSyncingVisual(false);
         }
-        app.save();
-        app.resetShowAll();
-        app.renderAll();
       }, function(err){
         console.error('cloud listener error', err);
+        setSyncingVisual(false);
       });
     }
     function stopCloudSync(){
       if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
       currentUser = null;
+      setSyncingVisual(false);
     }
 
     onAuthStateChanged(fbAuth, function(user){
